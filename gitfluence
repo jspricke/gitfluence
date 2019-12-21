@@ -1,0 +1,330 @@
+#!/usr/bin/python3
+#
+# Copyright (C) 2019-12-21  Jochen Sprickerhof
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+"""Confluence to git converter"""
+
+
+from argparse import ArgumentParser
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from pygit2 import init_repository, Repository, Signature
+from logging import basicConfig, DEBUG, debug, INFO, info, WARNING
+from os import chdir, makedirs, mkdir, remove, removedirs, rename, scandir
+from os.path import dirname, isdir, join, splitext
+from requests import Session
+from requests.auth import HTTPBasicAuth
+from subprocess import PIPE, Popen
+
+
+class Gitfluence:
+
+    def __init__(self, user, token, baselink, space=None, progress=False):
+        self.user = user
+        self.token = token
+        self.baselink = baselink
+        self.progress = progress
+        self.space = space
+
+        self.session = Session()
+        self.session.auth = HTTPBasicAuth(self.user, self.token)
+        self.session.headers.update({'Accept': 'application/json'})
+        self.session.params.update({'limit': 99999})
+
+        self.body = 'export_view'
+        self.pandoc = 'pandoc --from=html --to=markdown --metadata=URL:{url} --standalone --atx-headers --columns=200'
+        self.filetype = '.md'
+
+    def confluence(self, request, params=None):
+        if not params:
+            params = {}
+
+        params['start'] = 0
+        response = []
+
+        while True:
+            r = self.session.get(f'{self.baselink}/wiki/rest/api/{request}', params=params)
+            r.raise_for_status()
+            page = r.json()
+
+            if 'limit' not in page:
+                return page
+
+            response.extend(page['results'])
+            if 'next' not in page['_links']:
+                return response
+
+            params['start'] += int(page['limit'])
+
+    @staticmethod
+    def sanitize_title(title):
+        return title.replace('/', '_')
+
+    @staticmethod
+    def path(page_id, tree, titles, new_tree=None):
+        debug(f'path {page_id} {tree} {titles} {new_tree}')
+        if not page_id:
+            return ''
+        page = new_tree[page_id] if new_tree and page_id not in tree else tree[page_id]
+        return join(Gitfluence.path(page, tree, titles, new_tree), titles[page_id])
+
+    def list_spaces(self):
+        response = self.confluence('space')
+        return {r['key']: r['name'] for r in response}
+
+    def get_pages(self):
+        space = self.confluence(f'space/{self.space}/content/page')
+        return [page['id'] for page in space]
+
+    def get_history(self, page_ids, titles):
+        tree = {}
+        history = defaultdict(list)
+        num_changes = 0
+        for num_pages, page_id in enumerate(page_ids):
+            if page_id not in tree:
+                tree[page_id] = None
+            children = self.confluence(f'content/{page_id}/child/page')
+            for child in children:
+                tree[child['id']] = page_id
+
+            versions = self.confluence(f'content/{page_id}/version',
+                                       {'expand': 'content'})
+            for version in reversed(versions):
+                date = datetime.strptime(version['when'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                # drop microsecond cause git can't handle them
+                date = date.replace(microsecond=0)
+                number = version['number']
+                message = version['message']
+
+                name = version['by']['displayName']
+                name = name.replace(' (Unlicensed)', '')
+                name = name.replace(' (Deleted)', '')
+
+                if 'email' in version['by'] and version['by']['email']:
+                    email = version['by']['email']
+                else:
+                    email = 'none'
+                sign = Gitfluence.author(name, email, date)
+
+                if date > self.start_date:
+                    debug(date)
+                    debug(self.start_date)
+                    num_changes += 1
+                    history[date].append((page_id, number, sign, message))
+
+                # safe title in case we find an older child that was later moved there
+                if page_id not in titles:
+                    titles[page_id] = Gitfluence.sanitize_title(version['content']['title'])
+
+            if self.progress:
+                print(f'\r{num_pages}/{len(page_ids)} pages checked, {num_changes} changes found', end='')
+        return tree, history, num_changes
+
+    @staticmethod
+    def walk_repo(tree, titles, path='.', parent_id=None):
+        file_ids = {}
+        for name in (e for e in scandir(path) if e.is_file()):
+            info(f'read page_id from {name}')
+            f = open(name)
+            next(f)
+            line = next(f)
+            page_id = line[line.rfind('/') + 1:-2]
+            tree[page_id] = parent_id
+            title = splitext(name.name)[0]
+            titles[page_id] = title
+            file_ids[title] = page_id
+
+        for name in (e for e in scandir(path) if e.is_dir() and not e.name.startswith('.')):
+            Gitfluence.walk_repo(tree, titles, join(path, name.name), file_ids[name.name])
+
+    def remove_page(self, name):
+        info(f'removing {name}')
+        self.repo.index.remove(name)
+        remove(name)
+        try:
+            removedirs(dirname(name))
+        except OSError:
+            pass
+
+    def move_page(self, src, dst):
+        info(f'moving {src} to {dst}')
+        if dirname(dst) and not isdir(dirname(dst)):
+            makedirs(dirname(dst))
+        rename(src, dst)
+        self.repo.index.add_all(['.'])
+        try:
+            removedirs(dirname(src))
+        except OSError:
+            pass
+
+    def re_move_pages(self, old_tree, new_tree, titles):
+        deleted_pages = []
+        for page_id in list(old_tree):
+            if page_id not in new_tree:
+                name = Gitfluence.path(page_id, old_tree, titles)
+                self.remove_page(f'{name}{self.filetype}')
+                deleted_pages.append(page_id)
+
+            # only move pages if the new parent already exist
+            elif old_tree[page_id] != new_tree[page_id] and new_tree[page_id] in old_tree:
+                old_name = Gitfluence.path(page_id, old_tree, titles)
+                old_tree[page_id] = new_tree[page_id]
+                new_name = Gitfluence.path(page_id, old_tree, titles, new_tree)
+                self.move_page(f'{old_name}{self.filetype}', f'{new_name}{self.filetype}')
+
+        if self.repo.status():
+            sign = Gitfluence.author('Fake User', 'none', self.start_date)
+            self.commit(sign, 'Delete/Move articles')
+
+        for key in deleted_pages:
+            del old_tree[key]
+
+    def write_article(self, page_id, html, sign, date, message, path):
+        space = self.space.replace('~', '%7e')
+        url = f'{self.baselink}/wiki/spaces/{space}/pages/{page_id}'
+
+        p = Popen(self.pandoc.format(url=url).split(), stdin=PIPE, stdout=PIPE)
+        markdown = p.communicate(input=html.encode())[0].decode()
+
+        if dirname(path) and not isdir(dirname(path)):
+            # using makedirs here as the parent node could have been created
+            # later but we don't know where the node was before
+            makedirs(dirname(path))
+
+        fname = f'{path}{self.filetype}'
+        open(fname, 'w').write(markdown)
+
+        self.repo.index.add(fname)
+        self.commit(sign, message)
+        info(f'wrote {fname}')
+
+    @staticmethod
+    def author(name, email, date):
+        return Signature(name, email, int(date.timestamp()),
+                         int(date.utcoffset().total_seconds() / 60))
+
+    def commit(self, sign, message):
+        self.repo.index.write()
+        self.head = [self.repo.create_commit('HEAD', sign, sign, message,
+                                             self.repo.index.write_tree(), self.head)]
+
+    def git(self, history, num_changes, old_tree, new_tree, titles):
+        num_commit = 0
+
+        for date in sorted(history):
+            for page_id, number, sign, message in history[date]:
+
+                new_page = False
+                if page_id not in old_tree:
+                    old_tree[page_id] = new_tree[page_id]
+                    new_page = True
+
+                page = self.confluence(f'content/{page_id}',
+                                       {'expand': f'body.{self.body}',
+                                        'version': number})
+
+                new_title = Gitfluence.sanitize_title(page['title'])
+
+                fname = Gitfluence.path(page_id, old_tree, titles, new_tree)
+                if titles[page_id] != new_title:
+                    self.remove_page(f'{fname}{self.filetype}')
+
+                    titles[page_id] = new_title
+                    old_name = fname
+                    fname = Gitfluence.path(page_id, old_tree, titles, new_tree)
+
+                    if isdir(old_name):
+                        self.move_page(old_name, fname)
+
+                self.write_article(page_id, page['body'][self.body]['value'],
+                                   sign, date, message, fname)
+
+                if new_page:
+                    for child_id in old_tree:
+                        if old_tree[child_id] != page_id and new_tree[child_id] == page_id:
+                            old_name = Gitfluence.path(child_id, old_tree, titles, new_tree)
+                            old_tree[child_id] = new_tree[child_id]
+                            new_name = Gitfluence.path(page_id, old_tree, titles, new_tree)
+                            self.move_page(f'{old_name}{self.filetype}', f'{new_name}{self.filetype}')
+
+                    if self.repo.status():
+                        sign = Gitfluence.author('Fake User', 'none', date)
+                        self.commit(sign, 'Move articles')
+
+                num_commit += 1
+                if self.progress:
+                    print(f'\r{num_commit}/{num_changes} changes saved ({date:%Y-%m-%d})', end='')
+
+    def update(self):
+        if not args.space:
+            spaces = self.list_spaces()
+            for space in sorted(spaces):
+                print(f'{spaces[space]}: {space}')
+            return
+
+        if isdir(self.space):
+            self.repo = Repository(self.space)
+            self.head = [self.repo.head.target]
+            sign = self.repo.revparse_single('HEAD').author
+            tzinfo = timezone(timedelta(minutes=sign.offset))
+            self.start_date = datetime.fromtimestamp(sign.time, tzinfo)
+        else:
+            mkdir(self.space)
+            self.repo = init_repository(self.space)
+            self.head = []
+            self.start_date = datetime.min.replace(tzinfo=timezone.utc)
+
+        chdir(self.space)
+
+        old_tree = {}
+        titles = {}
+        Gitfluence.walk_repo(old_tree, titles)
+        debug(old_tree)
+        debug(titles)
+
+        page_ids = self.get_pages()
+        new_tree, history, num_changes = self.get_history(page_ids, titles)
+        if old_tree:
+            self.re_move_pages(old_tree, new_tree, titles)
+
+        debug(titles)
+        debug(history)
+
+        if self.progress and num_changes:
+            print()
+        self.git(history, num_changes, old_tree, new_tree, titles)
+        if self.progress:
+            print()
+
+
+if __name__ == '__main__':
+    parser = ArgumentParser(description='Clone Confluence space into git')
+    parser.add_argument('-d', '--debug', action='store_const', dest='loglevel',
+                        const=DEBUG, default=WARNING, help='Print debugging statements')
+    parser.add_argument('-p', '--progress', action='store_true', help='Print progress')
+    parser.add_argument('-v', '--verbose', action='store_const', dest='loglevel',
+                        const=INFO, help='Print verbose')
+    parser.add_argument('user', help='Confluence user')
+    parser.add_argument('token', help='Confluence token')
+    parser.add_argument('baselink', help='Confluence baselink')
+    parser.add_argument('space', nargs='?',
+                        help='Confluence space (leave empty to get a list)')
+    args = parser.parse_args()
+
+    basicConfig(format='%(levelname)s [%(filename)s:%(lineno)d]: %(message)s',
+                level=args.loglevel)
+
+    g = Gitfluence(args.user, args.token, args.baselink, args.space, args.progress)
+    g.update()
