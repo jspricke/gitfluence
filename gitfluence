@@ -92,7 +92,7 @@ class Gitfluence:
         tree = {}
         history = defaultdict(list)
         num_changes = 0
-        for num_pages, page_id in enumerate(page_ids):
+        for num_pages, page_id in enumerate(page_ids, 1):
             if page_id not in tree:
                 tree[page_id] = None
             children = self.confluence(f'content/{page_id}/child/page')
