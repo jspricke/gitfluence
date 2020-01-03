@@ -256,7 +256,7 @@ class Gitfluence:
                         if old_tree[child_id] != page_id and new_tree[child_id] == page_id:
                             old_name = Gitfluence.path(child_id, old_tree, titles, new_tree)
                             old_tree[child_id] = new_tree[child_id]
-                            new_name = Gitfluence.path(page_id, old_tree, titles, new_tree)
+                            new_name = Gitfluence.path(child_id, old_tree, titles, new_tree)
                             self.move_page(f'{old_name}{self.filetype}', f'{new_name}{self.filetype}')
 
                     if self.repo.status():
