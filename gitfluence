@@ -69,8 +69,11 @@ class Gitfluence:
             params['start'] += int(page['limit'])
 
     @staticmethod
-    def sanitize_title(title):
-        return title.replace('/', '_')
+    def sanitize_title(title, page_id):
+        title = title.replace('/', '_')
+        if not title:
+            return page_id
+        return title
 
     @staticmethod
     def path(page_id, tree, titles, new_tree=None):
@@ -124,7 +127,7 @@ class Gitfluence:
 
                 # safe title in case we find an older child that was later moved there
                 if page_id not in titles:
-                    titles[page_id] = Gitfluence.sanitize_title(version['content']['title'])
+                    titles[page_id] = Gitfluence.sanitize_title(version['content']['title'], page_id)
 
             if self.progress:
                 print(f'\r{num_pages}/{len(page_ids)} pages checked, {num_changes} changes found', end='')
@@ -233,7 +236,7 @@ class Gitfluence:
                                        {'expand': f'body.{self.body}',
                                         'version': number})
 
-                new_title = Gitfluence.sanitize_title(page['title'])
+                new_title = Gitfluence.sanitize_title(page['title'], page_id)
 
                 fname = Gitfluence.path(page_id, old_tree, titles, new_tree)
                 if titles[page_id] != new_title:
