@@ -119,8 +119,6 @@ class Gitfluence:
                 sign = Gitfluence.author(name, email, date)
 
                 if date > self.start_date:
-                    debug(date)
-                    debug(self.start_date)
                     num_changes += 1
                     history[date].append((page_id, number, sign, message))
 
