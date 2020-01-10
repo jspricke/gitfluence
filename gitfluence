@@ -159,11 +159,16 @@ class Gitfluence:
         except OSError:
             pass
 
-    def move_page(self, src, dst):
+    def move_page(self, child_id, old_tree, titles, new_tree):
+        src = Gitfluence.path(child_id, old_tree, titles, new_tree)
+        old_tree[child_id] = new_tree[child_id]
+        dst = Gitfluence.path(child_id, old_tree, titles, new_tree)
         info(f'moving {src} to {dst}')
         if dirname(dst) and not isdir(dirname(dst)):
             makedirs(dirname(dst))
-        rename(src, dst)
+        rename(f'{src}{self.filetype}', f'{dst}{self.filetype}')
+        if isdir(src):
+            rename(src, dst)
         self.repo.index.add_all(['.'])
         try:
             removedirs(dirname(src))
@@ -180,10 +185,7 @@ class Gitfluence:
 
             # only move pages if the new parent already exist
             elif old_tree[page_id] != new_tree[page_id] and new_tree[page_id] in old_tree:
-                old_name = Gitfluence.path(page_id, old_tree, titles)
-                old_tree[page_id] = new_tree[page_id]
-                new_name = Gitfluence.path(page_id, old_tree, titles, new_tree)
-                self.move_page(f'{old_name}{self.filetype}', f'{new_name}{self.filetype}')
+                self.move_page(page_id, old_tree, titles, new_tree)
 
         if self.repo.status():
             sign = Gitfluence.author('Fake User', 'none', self.start_date)
@@ -255,10 +257,7 @@ class Gitfluence:
                 if new_page:
                     for child_id in old_tree:
                         if old_tree[child_id] != page_id and new_tree[child_id] == page_id:
-                            old_name = Gitfluence.path(child_id, old_tree, titles, new_tree)
-                            old_tree[child_id] = new_tree[child_id]
-                            new_name = Gitfluence.path(child_id, old_tree, titles, new_tree)
-                            self.move_page(f'{old_name}{self.filetype}', f'{new_name}{self.filetype}')
+                            self.move_page(child_id, old_tree, titles, new_tree)
 
                     if self.repo.status():
                         sign = Gitfluence.author('Fake User', 'none', date)
