@@ -249,7 +249,8 @@ class Gitfluence:
                     fname = Gitfluence.path(page_id, old_tree, titles, new_tree)
 
                     if isdir(old_name):
-                        self.move_page(old_name, fname)
+                        rename(old_name, fname)
+                        self.repo.index.add_all(['.'])
 
                 self.write_article(page_id, page['body'][self.body]['value'],
                                    sign, date, message, fname)
