@@ -266,7 +266,7 @@ class Gitfluence:
 
                 num_commit += 1
                 if self.progress:
-                    print(f'\r{num_commit}/{num_changes} changes saved ({date:%Y-%m-%d})', end='')
+                    print(f'\r{num_commit}/{num_changes} changes saved ({date:%F})', end='')
 
     def update(self):
         if not args.space:
