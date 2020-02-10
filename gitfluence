@@ -154,10 +154,8 @@ class Gitfluence:
         info(f'removing {name}')
         self.repo.index.remove(name)
         remove(name)
-        try:
+        if not scandir(dirname(name)):
             removedirs(dirname(name))
-        except OSError:
-            pass
 
     def move_page(self, child_id, old_tree, titles, new_tree):
         src = Gitfluence.path(child_id, old_tree, titles, new_tree)
@@ -170,10 +168,8 @@ class Gitfluence:
         if isdir(src):
             rename(src, dst)
         self.repo.index.add_all(['.'])
-        try:
+        if not scandir(dirname(src)):
             removedirs(dirname(src))
-        except OSError:
-            pass
 
     def re_move_pages(self, old_tree, new_tree, titles):
         deleted_pages = []
