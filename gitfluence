@@ -244,13 +244,25 @@ class Gitfluence:
                 if titles[page_id] != new_title:
                     self.remove_page(f'{fname}{self.filetype}')
 
+                    children = {}
+                    if isdir(fname):
+                        for child_id in old_tree:
+                            if old_tree[child_id] == page_id:
+                                children[child_id] = Gitfluence.path(child_id, old_tree, titles, new_tree)
+
                     titles[page_id] = new_title
-                    old_name = fname
                     fname = Gitfluence.path(page_id, old_tree, titles, new_tree)
 
-                    if isdir(old_name):
-                        rename(old_name, fname)
-                        self.repo.index.add_all(['.'])
+                    for child_id, old_path in children.items():
+                        new_path = Gitfluence.path(child_id, old_tree, titles, new_tree)
+                        if not isdir(dirname(new_path)):
+                            makedirs(dirname(new_path))
+                        info(f'rename {old_path} {new_path}')
+                        rename(f'{old_path}{self.filetype}', f'{new_path}{self.filetype}')
+                        self.repo.index.remove(f'{old_path}{self.filetype}')
+                        self.repo.index.add(f'{new_path}{self.filetype}')
+                        if not scandir(dirname(old_path)):
+                            removedirs(dirname(old_path))
 
                 self.write_article(page_id, page['body'][self.body]['value'],
                                    sign, date, message, fname)
