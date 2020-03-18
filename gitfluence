@@ -150,11 +150,15 @@ class Gitfluence:
         for name in (e for e in scandir(path) if e.is_dir() and not e.name.startswith('.')):
             Gitfluence.walk_repo(tree, titles, join(path, name.name), file_ids[name.name])
 
+    @staticmethod
+    def empty_dir(directory):
+        return not next(scandir(directory), False)
+
     def remove_page(self, name):
         info(f'removing {name}')
         self.repo.index.remove(name)
         remove(name)
-        if not scandir(dirname(name)):
+        if Gitfluence.empty_dir(dirname(name)):
             removedirs(dirname(name))
 
     def move_page(self, child_id, old_tree, titles, new_tree):
@@ -168,7 +172,7 @@ class Gitfluence:
         if isdir(src):
             rename(src, dst)
         self.repo.index.add_all(['.'])
-        if not scandir(dirname(src)):
+        if Gitfluence.empty_dir(dirname(src)):
             removedirs(dirname(src))
 
     def re_move_pages(self, old_tree, new_tree, titles):
@@ -261,7 +265,7 @@ class Gitfluence:
                         rename(f'{old_path}{self.filetype}', f'{new_path}{self.filetype}')
                         self.repo.index.remove(f'{old_path}{self.filetype}')
                         self.repo.index.add(f'{new_path}{self.filetype}')
-                        if not scandir(dirname(old_path)):
+                        if Gitfluence.empty_dir(dirname(old_path)):
                             removedirs(dirname(old_path))
 
                 self.write_article(page_id, page['body'][self.body]['value'],
