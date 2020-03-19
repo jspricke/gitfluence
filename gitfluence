@@ -263,8 +263,9 @@ class Gitfluence:
                             makedirs(dirname(new_path))
                         info(f'rename {old_path} {new_path}')
                         rename(f'{old_path}{self.filetype}', f'{new_path}{self.filetype}')
-                        self.repo.index.remove(f'{old_path}{self.filetype}')
-                        self.repo.index.add(f'{new_path}{self.filetype}')
+                        if isdir(old_path):
+                            rename(old_path, new_path)
+                        self.repo.index.add_all(['.'])
                         if Gitfluence.empty_dir(dirname(old_path)):
                             removedirs(dirname(old_path))
 
