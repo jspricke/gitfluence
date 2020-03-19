@@ -161,10 +161,7 @@ class Gitfluence:
         if Gitfluence.empty_dir(dirname(name)):
             removedirs(dirname(name))
 
-    def move_page(self, child_id, old_tree, titles, new_tree):
-        src = Gitfluence.path(child_id, old_tree, titles, new_tree)
-        old_tree[child_id] = new_tree[child_id]
-        dst = Gitfluence.path(child_id, old_tree, titles, new_tree)
+    def move_page(self, src, dst):
         info(f'moving {src} to {dst}')
         if dirname(dst) and not isdir(dirname(dst)):
             makedirs(dirname(dst))
@@ -186,7 +183,10 @@ class Gitfluence:
 
             # only move pages if the new parent already exist
             elif old_tree[page_id] != new_tree[page_id] and new_tree[page_id] in old_tree:
-                self.move_page(page_id, old_tree, titles, new_tree)
+                src = Gitfluence.path(page_id, old_tree, titles, new_tree)
+                old_tree[page_id] = new_tree[page_id]
+                dst = Gitfluence.path(page_id, old_tree, titles, new_tree)
+                self.move_page(src, dst)
 
         if self.repo.status():
             sign = self.repo.revparse_single('HEAD').author
@@ -259,15 +259,7 @@ class Gitfluence:
 
                     for child_id, old_path in children.items():
                         new_path = Gitfluence.path(child_id, old_tree, titles, new_tree)
-                        if not isdir(dirname(new_path)):
-                            makedirs(dirname(new_path))
-                        info(f'rename {old_path} {new_path}')
-                        rename(f'{old_path}{self.filetype}', f'{new_path}{self.filetype}')
-                        if isdir(old_path):
-                            rename(old_path, new_path)
-                        self.repo.index.add_all(['.'])
-                        if Gitfluence.empty_dir(dirname(old_path)):
-                            removedirs(dirname(old_path))
+                        self.move_page(old_path, new_path)
 
                 self.write_article(page_id, page['body'][self.body]['value'],
                                    sign, date, message, fname)
