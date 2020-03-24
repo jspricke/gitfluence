@@ -152,7 +152,7 @@ class Gitfluence:
 
     @staticmethod
     def empty_dir(directory):
-        return not next(scandir(directory), False)
+        return directory and not next(scandir(directory), False)
 
     def remove_page(self, name):
         info(f'removing {name}')
