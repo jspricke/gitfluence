@@ -230,7 +230,8 @@ class Gitfluence:
     def git(self, history, num_changes, old_tree, new_tree, titles):
         num_commit = 0
 
-        self.repo.references.create('ORIG_HEAD', self.repo.head.target, force=True)
+        if self.head:
+            self.repo.references.create('ORIG_HEAD', self.repo.head.target, force=True)
         for date in sorted(history):
             for page_id, number, sign, message in history[date]:
 
