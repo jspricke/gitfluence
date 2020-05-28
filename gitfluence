@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pygit2 import init_repository, Repository, Signature
 from logging import basicConfig, DEBUG, debug, INFO, info, WARNING
 from os import chdir, makedirs, mkdir, remove, removedirs, rename, scandir
-from os.path import dirname, isdir, join, splitext
+from os.path import dirname, isdir, join, normpath, splitext
 from requests import Session
 from requests.auth import HTTPBasicAuth
 from subprocess import PIPE, Popen
@@ -36,7 +36,7 @@ class Gitfluence:
         self.token = token
         self.baselink = baselink
         self.progress = progress
-        self.space = space
+        self.space = normpath(space) if space else None
 
         self.session = Session()
         self.session.auth = HTTPBasicAuth(self.user, self.token)
