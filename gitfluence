@@ -172,22 +172,39 @@ class Gitfluence:
         if Gitfluence.empty_dir(dirname(src)):
             removedirs(dirname(src))
 
+    @staticmethod
+    def reverse_tree(tree):
+        new_tree = defaultdict(list)
+        for leave in tree:
+            if tree[leave]:
+                new_tree[tree[leave]].append(leave)
+            else:
+                root = leave
+        return new_tree, root
+
+    def re_move_page(self, page_id, old_tree, new_tree, titles, deleted_pages):
+        if page_id not in new_tree:
+            if page_id not in old_tree.values():
+                name = Gitfluence.path(page_id, old_tree, titles)
+                self.remove_page(f'{name}{self.filetype}')
+                deleted_pages.append(page_id)
+
+        # only move pages if the new parent already exist
+        elif old_tree[page_id] != new_tree[page_id] and new_tree[page_id] in old_tree:
+            src = Gitfluence.path(page_id, old_tree, titles, new_tree)
+            old_tree[page_id] = new_tree[page_id]
+            dst = Gitfluence.path(page_id, old_tree, titles, new_tree)
+            self.move_page(src, dst)
+
+    def post_traverse(self, tree, node, old_tree, new_tree, titles, deleted_pages):
+        for c in tree[node]:
+            self.post_traverse(tree, c, old_tree, new_tree, titles, deleted_pages)
+        self.re_move_page(node, old_tree, new_tree, titles, deleted_pages)
+
     def re_move_pages(self, old_tree, new_tree, titles):
         deleted_pages = []
-        for page_id in old_tree:
-            if page_id not in new_tree:
-                if page_id not in old_tree.values():
-                    name = Gitfluence.path(page_id, old_tree, titles)
-                    self.remove_page(f'{name}{self.filetype}')
-                    deleted_pages.append(page_id)
-
-            # only move pages if the new parent already exist
-            elif old_tree[page_id] != new_tree[page_id] and new_tree[page_id] in old_tree:
-                src = Gitfluence.path(page_id, old_tree, titles, new_tree)
-                old_tree[page_id] = new_tree[page_id]
-                dst = Gitfluence.path(page_id, old_tree, titles, new_tree)
-                self.move_page(src, dst)
-
+        reversed_tree, root = Gitfluence.reverse_tree(old_tree)
+        self.post_traverse(reversed_tree, root, old_tree, new_tree, titles, deleted_pages)
         if self.repo.status():
             sign = self.repo.revparse_single('HEAD').author
             tzinfo = timezone(timedelta(minutes=sign.offset))
