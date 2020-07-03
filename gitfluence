@@ -91,7 +91,7 @@ class Gitfluence:
         space = self.confluence(f'space/{self.space}/content/page')
         return [page['id'] for page in space]
 
-    def get_history(self, page_ids, titles):
+    def get_history(self, page_ids, titles, old_tree, start_date):
         tree = {}
         history = defaultdict(list)
         num_changes = 0
@@ -121,7 +121,8 @@ class Gitfluence:
                     email = 'none'
                 sign = Gitfluence.author(name, email, date)
 
-                if date > self.start_date:
+                # safe old changes in case the page was moved into the space
+                if page_id not in old_tree or date > start_date:
                     num_changes += 1
                     history[date].append((page_id, number, sign, message))
 
@@ -292,12 +293,12 @@ class Gitfluence:
             self.head = [self.repo.head.target]
             sign = self.repo.revparse_single('HEAD').author
             tzinfo = timezone(timedelta(minutes=sign.offset))
-            self.start_date = datetime.fromtimestamp(sign.time, tzinfo)
+            start_date = datetime.fromtimestamp(sign.time, tzinfo)
         else:
             mkdir(self.space)
             self.repo = init_repository(self.space)
             self.head = []
-            self.start_date = datetime.min.replace(tzinfo=timezone.utc)
+            start_date = None
 
         chdir(self.space)
 
@@ -308,7 +309,7 @@ class Gitfluence:
         debug(titles)
 
         page_ids = self.get_pages()
-        new_tree, history, num_changes = self.get_history(page_ids, titles)
+        new_tree, history, num_changes = self.get_history(page_ids, titles, old_tree, start_date)
         if old_tree:
             self.re_move_pages(old_tree, new_tree, titles)
 
