@@ -175,13 +175,14 @@ class Gitfluence:
 
     @staticmethod
     def reverse_tree(tree):
+        roots = []
         new_tree = defaultdict(list)
         for leave in tree:
             if tree[leave]:
                 new_tree[tree[leave]].append(leave)
             else:
-                root = leave
-        return new_tree, root
+                roots.append(leave)
+        return new_tree, roots
 
     def re_move_page(self, page_id, old_tree, new_tree, titles, deleted_pages):
         if page_id not in new_tree:
@@ -204,8 +205,9 @@ class Gitfluence:
 
     def re_move_pages(self, old_tree, new_tree, titles):
         deleted_pages = []
-        reversed_tree, root = Gitfluence.reverse_tree(old_tree)
-        self.post_traverse(reversed_tree, root, old_tree, new_tree, titles, deleted_pages)
+        reversed_tree, roots = Gitfluence.reverse_tree(old_tree)
+        for root in roots:
+            self.post_traverse(reversed_tree, root, old_tree, new_tree, titles, deleted_pages)
         if self.repo.status():
             sign = self.repo.revparse_single('HEAD').author
             tzinfo = timezone(timedelta(minutes=sign.offset))
