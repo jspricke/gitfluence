@@ -250,8 +250,6 @@ class Gitfluence:
     def git(self, history, num_changes, old_tree, new_tree, titles):
         num_commit = 0
 
-        if self.head:
-            self.repo.references.create('ORIG_HEAD', self.repo.head.target, force=True)
         for date in sorted(history):
             for page_id, number, sign, message in history[date]:
 
@@ -296,6 +294,7 @@ class Gitfluence:
             sign = self.repo.revparse_single('HEAD').author
             tzinfo = timezone(timedelta(minutes=sign.offset))
             start_date = datetime.fromtimestamp(sign.time, tzinfo)
+            self.repo.references.create('ORIG_HEAD', self.repo.head.target, force=True)
         else:
             mkdir(self.space)
             self.repo = init_repository(self.space)
