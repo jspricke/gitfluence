@@ -21,11 +21,12 @@ from argparse import ArgumentParser
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pygit2 import init_repository, Repository, Signature
-from logging import basicConfig, DEBUG, debug, INFO, info, WARNING
+from logging import basicConfig, DEBUG, debug, exception, INFO, info, WARNING
 from os import chdir, makedirs, mkdir, remove, removedirs, rename, scandir
 from os.path import dirname, isdir, join, normpath, splitext
 from requests import Session
 from requests.auth import HTTPBasicAuth
+from requests.exceptions import HTTPError
 from subprocess import PIPE, Popen
 
 
@@ -56,7 +57,15 @@ class Gitfluence:
 
         while True:
             r = self.session.get(f'{self.baselink}/wiki/rest/api/{request}', params=params)
-            r.raise_for_status()
+            try:
+                r.raise_for_status()
+            except HTTPError as e:
+                exception(e)
+                print('Failed to download from Confluence, retrying automatically.')
+                print('In case of longer network issues Ctrl-C and restart later.')
+                print('It will continue at the current state.')
+                # TODO maybe add sleep
+                continue
             page = r.json()
 
             if 'limit' not in page:
